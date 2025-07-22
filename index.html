@@ -649,6 +649,84 @@
         color: var(--text-secondary);
       }
 
+      /* AI-сводка стили */
+      .ai-summary-section {
+        background: linear-gradient(
+          135deg,
+          rgba(139, 92, 246, 0.15),
+          rgba(59, 130, 246, 0.1)
+        );
+        border-radius: 20px;
+        padding: 30px;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        margin-top: 30px;
+        box-shadow: 0 10px 30px rgba(139, 92, 246, 0.2);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .ai-summary-section::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="10" cy="10" r="1.5" fill="rgba(139,92,246,0.2)"/><circle cx="90" cy="20" r="2" fill="rgba(139,92,246,0.15)"/><circle cx="30" cy="90" r="1" fill="rgba(139,92,246,0.25)"/><circle cx="80" cy="80" r="1.8" fill="rgba(139,92,246,0.2)"/></svg>');
+        animation: aiFloat 25s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      @keyframes aiFloat {
+        0%,
+        100% {
+          transform: translateY(0px) rotate(0deg);
+        }
+        50% {
+          transform: translateY(-15px) rotate(180deg);
+        }
+      }
+
+      .ai-summary-section .section-title {
+        background: linear-gradient(
+          135deg,
+          var(--accent-secondary),
+          var(--accent-primary)
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        color: transparent;
+        font-size: 1.4rem;
+        margin-bottom: 25px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        position: relative;
+        z-index: 1;
+      }
+
+      .ai-summary-content {
+        position: relative;
+        z-index: 1;
+      }
+
+      .ai-summary-content p {
+        margin: 15px 0;
+        line-height: 1.8;
+        color: var(--text-primary);
+        font-size: 1rem;
+        text-align: justify;
+      }
+
+      .ai-summary-content p:first-child {
+        margin-top: 0;
+      }
+
+      .ai-summary-content p:last-child {
+        margin-bottom: 0;
+      }
+
       .profitability-highlight {
         background: linear-gradient(135deg, var(--warning), #d97706);
         color: white;
@@ -709,6 +787,14 @@
         .form-row {
           grid-template-columns: 1fr;
           gap: 15px;
+        }
+
+        .ai-summary-section {
+          padding: 20px;
+        }
+
+        .ai-summary-section .section-title {
+          font-size: 1.2rem;
         }
       }
 
@@ -866,13 +952,17 @@
           rent: [2, 8],
           label: "Очень низкая",
         },
-        developer: { sub: [], op: [], rent: [15, 30], label: "Высокая" },
+        developer: {
+          sub: [0, 0],
+          op: [2, 5],
+          rent: [15, 30],
+          label: "Высокая",
+        },
       };
 
       function applyPreset() {
         const preset = presets[document.getElementById("preset-select").value];
         if (!preset) return;
-
         // Берём средние
         if (preset.sub.length) {
           document.getElementById("subcontract-percent").value = Math.round(
@@ -905,26 +995,49 @@
         document.getElementById("pdfButton").disabled = true;
 
         try {
-          const proxyUrl = "https://api.allorigins.win/get?url=";
-          const targetUrl = encodeURIComponent(
-            `https://www.rusprofile.ru/search?query=${inn}`
-          );
+          // Обновлённый список прокси для большей надёжности
+          const proxies = [
+            "https://api.allorigins.win/get?url=",
+            "https://corsproxy.io/?",
+            "https://api.codetabs.com/v1/proxy?quest=",
+            "https://thingproxy.freeboard.io/fetch/",
+          ];
 
-          const response = await fetch(proxyUrl + targetUrl);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          const targetUrl = `https://www.rusprofile.ru/search?query=${inn}`;
+          let html = await fetchWithRetry(proxies, targetUrl);
+
+          if (!html || typeof html !== "string" || !html.includes("<html")) {
+            throw new Error(
+              "Все прокси-сервера недоступны или вернули некорректные данные"
+            );
           }
 
-          const data = await response.json();
-          const html = data.contents;
+          // Логируем части HTML для отладки
+          console.log("Первые 500 символов HTML:", html.substring(0, 500));
 
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, "text/html");
 
+          // Проверяем основные элементы
+          console.log(
+            "Найдено элементов h1:",
+            doc.querySelectorAll("h1").length
+          );
+          console.log(
+            "Найдено элементов .company-name:",
+            doc.querySelectorAll(".company-name").length
+          );
+          console.log(
+            "Найдено элементов #anketa:",
+            doc.querySelectorAll("#anketa").length
+          );
+
+          // Ищем детальную страницу компании
           const companyInfo =
             doc.querySelector("#anketa") || doc.querySelector(".company-info");
 
           if (companyInfo) {
+            console.log("Найдена детальная страница компании");
             const detailedData = extractDetailedCompanyData(doc);
             currentCompanyData = detailedData;
             displayResults(detailedData);
@@ -932,25 +1045,131 @@
             return;
           }
 
-          const companyBlock =
-            doc.querySelector(".company-item") ||
-            doc.querySelector(".search-result-item") ||
-            doc.querySelector("[data-company-id]");
+          // Ищем в результатах поиска с более общими селекторами
+          const searchResults = [
+            ".search-result__item",
+            ".company-item",
+            "[data-company-id]",
+            ".search-item",
+            ".company-preview",
+          ];
 
-          if (!companyBlock) {
-            showError("Компания с указанным ИНН не найдена");
-            return;
+          let companyBlock = null;
+          for (const selector of searchResults) {
+            companyBlock = doc.querySelector(selector);
+            if (companyBlock) {
+              console.log(`Найден результат поиска по селектору: ${selector}`);
+              break;
+            }
           }
 
+          if (!companyBlock) {
+            // Попробуем найти любую ссылку на компанию с улучшенной логикой
+            const companyLinks = doc.querySelectorAll('a[href*="/id/"]');
+            console.log("Найдено ссылок на компании:", companyLinks.length);
+            if (companyLinks.length > 0) {
+              // Переходим на первую найденную компанию
+              const companyUrl =
+                "https://www.rusprofile.ru" +
+                companyLinks[0].getAttribute("href");
+              console.log("Переходим на страницу компании:", companyUrl);
+
+              // Повторный запрос за детальными данными с ретраем
+              html = await fetchWithRetry(proxies, companyUrl);
+
+              const detailDoc = parser.parseFromString(html, "text/html");
+
+              const detailedData = extractDetailedCompanyData(detailDoc);
+              currentCompanyData = detailedData;
+              displayResults(detailedData);
+              document.getElementById("pdfButton").disabled = false;
+              return;
+            }
+
+            throw new Error(
+              "Компания с указанным ИНН не найдена. Проверьте корректность ИНН."
+            );
+          }
+
+          // Если нашли блок компании, но это не детальная страница
+          console.log("Извлекаем данные из результатов поиска");
           const companyData = extractCompanyData(companyBlock, doc);
           currentCompanyData = companyData;
           displayResults(companyData);
           document.getElementById("pdfButton").disabled = false;
         } catch (error) {
-          console.error("Ошибка:", error);
-          showError("Ошибка при получении данных: " + error.message);
+          console.error("Ошибка получения данных:", error);
+          showError(`Ошибка получения данных: ${error.message}. 
+      Возможные причины:
+      • Проблемы с интернет-соединением
+      • Сайт RusProfile временно недоступен  
+      • Компания с таким ИНН не найдена
+      • Попробуйте позже или проверьте ИНН`);
         } finally {
           showLoading(false);
+        }
+      }
+
+      // Новая функция для fetch с ретраями и проверкой
+      async function fetchWithRetry(proxies, url, retries = 2) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+          for (const proxy of proxies) {
+            try {
+              console.log(`Пробуем прокси: ${proxy} (попытка ${attempt + 1})`);
+              const fullUrl = proxy + encodeURIComponent(url);
+
+              const response = await fetch(fullUrl, {
+                method: "GET",
+                headers: {
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                },
+                timeout: 15000,
+              });
+
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+
+              const data = await response.json();
+              const html = data.contents || data.body || data || data.data;
+
+              // Проверка на валидный HTML
+              if (typeof html === "string" && html.includes("<html")) {
+                console.log(`Успешно получили данные через: ${proxy}`);
+                console.log(`Размер ответа: ${html.length} символов`);
+                return html;
+              } else {
+                throw new Error("Ответ не содержит валидный HTML");
+              }
+            } catch (error) {
+              console.warn(`Прокси ${proxy} недоступен:`, error);
+              continue;
+            }
+          }
+        }
+        throw new Error("Все попытки fetch провалились");
+      }
+
+      // Функция для тестирования прокси (для отладки)
+      async function testProxies() {
+        const proxies = [
+          "https://api.allorigins.win/get?url=",
+          "https://corsproxy.io/?",
+          "https://api.codetabs.com/v1/proxy?quest=",
+        ];
+
+        console.log("Тестируем доступность прокси-серверов...");
+
+        for (const proxy of proxies) {
+          try {
+            const testUrl =
+              proxy + encodeURIComponent("https://httpbin.org/json");
+            const response = await fetch(testUrl, { timeout: 5000 });
+            console.log(`✅ Прокси ${proxy} - доступен (${response.status})`);
+          } catch (error) {
+            console.log(`❌ Прокси ${proxy} - недоступен:`, error.message);
+          }
         }
       }
 
@@ -993,7 +1212,6 @@
         if (feesAmount > 0) {
           calculations.fotWithContributions2023 = (feesAmount / 0.3) * 1.3;
         }
-
         if (calculations.fotWithContributions2023 && revenueGrowthRate !== 0) {
           calculations.fotWithContributions2024 =
             calculations.fotWithContributions2023 * (1 + revenueGrowthRate);
@@ -1437,6 +1655,8 @@
             });
           }
 
+          // Примечание: AI-сводка в PDF не добавляется согласно требованию
+
           const docDefinition = {
             content: content,
 
@@ -1478,7 +1698,7 @@
             footer: {
               columns: [
                 {
-                  text: "Разработчик: Игорь Ромашов · Версия 2.1 beta",
+                  text: "Разработчик: Игорь Ромашов · Версия 2.2 beta",
                   fontSize: 8,
                   color: "#666666",
                 },
@@ -1630,10 +1850,13 @@
         let summary = "";
         let procurement = null;
         let taxes = null;
+        let aiSummary = ""; // Добавляем AI-сводку
 
-        // Название компании
+        // Название компании (улучшенный селектор)
         const titleElement =
-          doc.querySelector("h1") || doc.querySelector(".company-name");
+          doc.querySelector("h1[itemprop='name']") ||
+          doc.querySelector(".company-name") ||
+          doc.querySelector("h1");
         if (titleElement) {
           name = titleElement.textContent.trim();
         }
@@ -1649,11 +1872,17 @@
           }
         }
 
-        // Директор
-        const managerBlock = doc.querySelector(".company-info__item");
+        // Директор (улучшенный селектор)
+        const managerBlock =
+          doc.querySelector("[itemprop='founder']") ||
+          doc.querySelector(".company-info__item");
         if (managerBlock) {
-          const chiefTitle = managerBlock.querySelector(".chief-title");
-          const managerLink = managerBlock.querySelector("a");
+          const chiefTitle =
+            managerBlock.querySelector(".chief-title") ||
+            managerBlock.querySelector("[itemprop='jobTitle']");
+          const managerLink =
+            managerBlock.querySelector("a[itemprop='name']") ||
+            managerBlock.querySelector("a");
 
           if (
             chiefTitle &&
@@ -1681,21 +1910,30 @@
           }
         }
 
-        // Основные реквизиты
-        const ogrnElement = doc.querySelector("#clip_ogrn");
+        // Основные реквизиты (улучшенные селекторы)
+        const ogrnElement =
+          doc.querySelector("#clip_ogrn") ||
+          doc.querySelector("[itemprop='ogrn']");
         if (ogrnElement) ogrn = ogrnElement.textContent.trim();
 
-        const innElement = doc.querySelector("#clip_inn");
+        const innElement =
+          doc.querySelector("#clip_inn") ||
+          doc.querySelector("[itemprop='taxID']");
         if (innElement) innFound = innElement.textContent.trim();
 
-        const addressElement = doc.querySelector("#clip_address");
+        const addressElement =
+          doc.querySelector("#clip_address") ||
+          doc.querySelector("[itemprop='address']");
         if (addressElement)
           address = addressElement.textContent.trim().replace(/\s+/g, " ");
 
-        const regDateElement = doc.querySelector('[itemprop="foundingDate"]');
+        const regDateElement =
+          doc.querySelector('[itemprop="foundingDate"]') ||
+          doc.querySelector(".reg-date");
         if (regDateElement)
           registrationDate = regDateElement.textContent.trim();
 
+        // Уставный капитал
         const allElements = doc.querySelectorAll(".company-info__text");
         for (const element of allElements) {
           if (
@@ -1708,7 +1946,9 @@
         }
 
         // Краткая справка
-        const summaryBlock = doc.querySelector(".enquiry-tile");
+        const summaryBlock =
+          doc.querySelector(".enquiry-tile") ||
+          doc.querySelector(".company-summary");
         if (summaryBlock) {
           const summaryTexts = summaryBlock.querySelectorAll(
             ".enquiry-tile__text"
@@ -1723,8 +1963,37 @@
           summary = summaryParts.join("\n\n");
         }
 
-        // НАЛОГИ И СБОРЫ
-        const taxesBlock = doc.querySelector(".taxes-tile");
+        // AI-сводка (новый парсинг)
+        const aiSummaryBlock = doc.querySelector(
+          ".company-description__wrapper"
+        );
+        if (aiSummaryBlock) {
+          const aiTextElement = aiSummaryBlock.querySelector(
+            ".company-description__text"
+          );
+          if (aiTextElement) {
+            // Извлекаем текст из всех параграфов
+            const paragraphs = aiTextElement.querySelectorAll("p");
+            const aiParts = [];
+            paragraphs.forEach((paragraph) => {
+              const text = paragraph.textContent.trim();
+              if (text) {
+                aiParts.push(text);
+              }
+            });
+            aiSummary = aiParts.join("\n\n");
+
+            console.log(
+              "Найдена AI-сводка:",
+              aiSummary.substring(0, 200) + "..."
+            );
+          }
+        }
+
+        // НАЛОГИ И СБОРЫ (улучшенный парсинг)
+        const taxesBlock =
+          doc.querySelector(".taxes-tile") ||
+          doc.querySelector("[data-tile='taxes']");
         if (taxesBlock) {
           taxes = {
             year: "",
@@ -1776,8 +2045,10 @@
           });
         }
 
-        // ГОСЗАКУПКИ
-        const procurementBlock = doc.querySelector(".gz-tile");
+        // ГОСЗАКУПКИ (улучшенный парсинг)
+        const procurementBlock =
+          doc.querySelector(".gz-tile") ||
+          doc.querySelector("[data-tile='procurement']");
         if (procurementBlock) {
           procurement = {
             role: "",
@@ -1787,16 +2058,22 @@
           };
 
           const roleElement =
-            procurementBlock.querySelector(".tab-opener.active");
+            procurementBlock.querySelector(".tab-opener.active") ||
+            procurementBlock.querySelector(".role-tab");
           if (roleElement) {
             procurement.role = roleElement.textContent.trim();
           }
 
           const customerItems =
-            procurementBlock.querySelectorAll(".founder-item");
+            procurementBlock.querySelectorAll(".founder-item") ||
+            procurementBlock.querySelectorAll(".customer-block");
           customerItems.forEach((item) => {
-            const nameElement = item.querySelector(".founder-item__title span");
-            const statsElement = item.querySelector(".founder-item__dl");
+            const nameElement =
+              item.querySelector(".founder-item__title span") ||
+              item.querySelector(".customer-name");
+            const statsElement =
+              item.querySelector(".founder-item__dl") ||
+              item.querySelector(".customer-stats");
 
             if (nameElement && statsElement) {
               const name = nameElement.textContent.trim();
@@ -1826,12 +2103,16 @@
           }
         }
 
-        // ФИНАНСОВЫЕ ДАННЫЕ
-        const financeBlock = doc.querySelector(".tile-finance-columns");
+        // ФИНАНСОВЫЕ ДАННЫЕ (улучшенный парсинг)
+        const financeBlock =
+          doc.querySelector(".tile-finance-columns") ||
+          doc.querySelector("[data-tile='finance']");
         if (financeBlock) {
-          const revenueCol = financeBlock
-            .querySelector('[data-tab_name="tab_revenue"]')
-            ?.closest(".finance-col");
+          const revenueCol =
+            financeBlock
+              .querySelector('[data-tab_name="tab_revenue"]')
+              ?.closest(".finance-col") ||
+            financeBlock.querySelector(".revenue-col");
           if (revenueCol) {
             const numElement = revenueCol.querySelector(".num");
             const numTextElement = revenueCol.querySelector(".num-text");
@@ -1852,9 +2133,11 @@
             }
           }
 
-          const profitCol = financeBlock
-            .querySelector('[data-tab_name="tab_profit"]')
-            ?.closest(".finance-col");
+          const profitCol =
+            financeBlock
+              .querySelector('[data-tab_name="tab_profit"]')
+              ?.closest(".finance-col") ||
+            financeBlock.querySelector(".profit-col");
           if (profitCol) {
             const diffElement = profitCol.querySelector(".diff.mt");
             if (diffElement) {
@@ -1864,9 +2147,11 @@
             }
           }
 
-          const valueCol = financeBlock
-            .querySelector('[data-tab_name="tab_value"]')
-            ?.closest(".finance-col");
+          const valueCol =
+            financeBlock
+              .querySelector('[data-tab_name="tab_value"]')
+              ?.closest(".finance-col") ||
+            financeBlock.querySelector(".value-col");
           if (valueCol) {
             const diffElement = valueCol.querySelector(".diff.mt");
             if (diffElement) {
@@ -1890,6 +2175,7 @@
           summary,
           procurement,
           taxes,
+          aiSummary, // Добавляем AI-сводку к возвращаемым данным
           isDetailed: true,
         };
       }
@@ -2190,6 +2476,21 @@
                         <div class="section-title">📄 Справочная информация</div>
                         <div class="summary-section">
                             ${data.summary
+                              .split("\n\n")
+                              .map((paragraph) => `<p>${paragraph}</p>`)
+                              .join("")}
+                        </div>
+                    </div>
+                `;
+        }
+
+        // AI-сводка в самом конце (только если есть)
+        if (data.aiSummary) {
+          contentHtml += `
+                    <div class="ai-summary-section">
+                        <div class="section-title">🤖 AI-анализ компании</div>
+                        <div class="ai-summary-content">
+                            ${data.aiSummary
                               .split("\n\n")
                               .map((paragraph) => `<p>${paragraph}</p>`)
                               .join("")}
