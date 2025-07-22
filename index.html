@@ -813,6 +813,24 @@
       .fade-in {
         animation: fadeInUp 0.6s ease-out forwards;
       }
+
+      /* Мобильная оптимизация загрузки */
+      @media (max-width: 768px) {
+        #loading {
+          padding: 30px 20px;
+        }
+
+        #loading p {
+          font-size: 14px;
+          line-height: 1.5;
+        }
+
+        .spinner {
+          width: 40px;
+          height: 40px;
+          margin: 0 auto 15px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1099,12 +1117,33 @@
           document.getElementById("pdfButton").disabled = false;
         } catch (error) {
           console.error("Ошибка получения данных:", error);
-          showError(`Ошибка получения данных: ${error.message}. 
-      Возможные причины:
-      • Проблемы с интернет-соединением
-      • Сайт RusProfile временно недоступен  
-      • Компания с таким ИНН не найдена
-      • Попробуйте позже или проверьте ИНН`);
+
+          const isMobile =
+            /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+              navigator.userAgent
+            );
+
+          let errorMessage = `Ошибка получения данных: ${error.message}`;
+
+          if (isMobile) {
+            errorMessage += `
+
+🔧 Решения для мобильных устройств:
+• Переключитесь на WiFi если используете мобильный интернет
+• Попробуйте обновить страницу через 10-15 секунд
+• Используйте браузер Chrome или Safari
+• Как альтернатива - откройте сайт с ПК`;
+          }
+
+          errorMessage += `
+  
+Возможные причины:
+• Проблемы с интернет-соединением
+• Прокси-серверы временно недоступны
+• Компания с таким ИНН не найдена
+• Попробуйте позже или проверьте ИНН`;
+
+          showError(errorMessage);
         } finally {
           showLoading(false);
         }
@@ -1112,20 +1151,38 @@
 
       // Новая функция для fetch с ретраями и проверкой
       async function fetchWithRetry(proxies, url, retries = 2) {
+        const isMobile =
+          /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+            navigator.userAgent
+          );
+        const timeout = isMobile ? 30000 : 15000; // Увеличенный таймаут для мобильных
+
         for (let attempt = 0; attempt <= retries; attempt++) {
           for (const proxy of proxies) {
             try {
-              console.log(`Пробуем прокси: ${proxy} (попытка ${attempt + 1})`);
+              console.log(
+                `Пробуем прокси: ${proxy} (попытка ${attempt + 1}) - ${
+                  isMobile ? "мобильное" : "десктопное"
+                } устройство`
+              );
+
+              // Создаём AbortController для таймаута
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), timeout);
+
               const fullUrl = proxy + encodeURIComponent(url);
 
               const response = await fetch(fullUrl, {
                 method: "GET",
                 headers: {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                  "User-Agent": isMobile
+                    ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" // Маскируем под десктоп
+                    : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 },
-                timeout: 15000,
+                signal: controller.signal,
               });
+
+              clearTimeout(timeoutId);
 
               if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
@@ -1143,7 +1200,11 @@
                 throw new Error("Ответ не содержит валидный HTML");
               }
             } catch (error) {
-              console.warn(`Прокси ${proxy} недоступен:`, error);
+              if (error.name === "AbortError") {
+                console.warn(`Прокси ${proxy} превысил таймаут (${timeout}ms)`);
+              } else {
+                console.warn(`Прокси ${proxy} недоступен:`, error);
+              }
               continue;
             }
           }
@@ -1154,11 +1215,13 @@
       // Функция для тестирования прокси (для отладки)
       async function testProxies() {
         const proxies = [
+          "https://cors-anywhere.herokuapp.com/", // Требует активации, но стабильный
           "https://api.allorigins.win/get?url=",
+          "https://thingproxy.freeboard.io/fetch/",
           "https://corsproxy.io/?",
           "https://api.codetabs.com/v1/proxy?quest=",
+          "https://cors-proxy.fringe.zone/", // Дополнительный прокси
         ];
-
         console.log("Тестируем доступность прокси-серверов...");
 
         for (const proxy of proxies) {
@@ -1698,7 +1761,7 @@
             footer: {
               columns: [
                 {
-                  text: "Разработчик: Игорь Ромашов · Версия 2.2 beta",
+                  text: "Разработчик: Игорь Ромашов · Версия 2.3 beta",
                   fontSize: 8,
                   color: "#666666",
                 },
@@ -2506,12 +2569,19 @@
       function showLoading(show) {
         const loading = document.getElementById("loading");
         const button = document.getElementById("searchButton");
+        const isMobile =
+          /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+            navigator.userAgent
+          );
 
         loading.style.display = show ? "block" : "none";
         button.disabled = show;
 
         if (show) {
-          button.innerHTML = "⏳ Анализируем...";
+          const message = isMobile
+            ? "⏳ Анализируем... (на мобильном может занять до 30 сек)"
+            : "⏳ Анализируем...";
+          button.innerHTML = message;
         } else {
           button.innerHTML = "🔍 Анализировать компанию";
         }
